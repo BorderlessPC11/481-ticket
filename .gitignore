@@ -1,0 +1,41 @@
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# SQLite databases
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Cursor
+.cursor/
+
+# App-generated artifacts
+pos_system/qrcodes/

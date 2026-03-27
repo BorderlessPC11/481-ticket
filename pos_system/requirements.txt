@@ -1,0 +1,4 @@
+requests
+qrcode
+python-dotenv
+Pillow
