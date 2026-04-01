@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 
 from app.api.client import ExternalApiClient
 from app.models.exceptions import ApiClientError
@@ -27,6 +28,8 @@ class SyncWorker:
             try:
                 self._dispatch(endpoint, payload)
                 self._repository.mark_sync_done(row_id)
+                if queue_type == "event" and isinstance(payload, dict) and payload.get("id"):
+                    self._repository.update_event_status(str(payload["id"]), "SENT")
                 self._logger.log("sync_success", {"row_id": row_id, "queue_type": queue_type}, "ok")
                 processed += 1
             except ApiClientError as exc:
@@ -35,7 +38,8 @@ class SyncWorker:
                     self._repository.mark_sync_dead(row_id, str(exc))
                     self._logger.log("sync_dead", {"row_id": row_id, "queue_type": queue_type}, "error")
                 else:
-                    backoff_seconds = min(2 ** next_attempt, 60)
+                    jitter = random.randint(0, 3)
+                    backoff_seconds = min((2 ** next_attempt) + jitter, 60)
                     self._repository.mark_sync_failed_attempt(row_id, next_attempt, backoff_seconds, str(exc))
                     self._logger.log("sync_retry", {"row_id": row_id, "attempt": next_attempt}, "retry")
         return processed

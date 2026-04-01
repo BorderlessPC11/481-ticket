@@ -4,6 +4,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+TICKET_STATUS_OPEN = "OPEN"
+TICKET_STATUS_AWAITING_PAYMENT = "AWAITING_PAYMENT"
+TICKET_STATUS_CLOSED = "CLOSED"
+
+EVENT_STATUS_PENDING = "PENDING"
+EVENT_STATUS_QUEUED = "QUEUED"
+EVENT_STATUS_SENT = "SENT"
+
 
 @dataclass(frozen=True)
 class Product:

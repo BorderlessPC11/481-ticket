@@ -13,6 +13,7 @@ from app.repositories.pos_repository import PosRepository
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("backend")
+_request_counters: dict[str, int] = {"total": 0, "errors": 0}
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -44,5 +45,13 @@ async def request_logger(request: Request, call_next):
             "elapsed_ms": elapsed_ms,
         }
     )
+    _request_counters["total"] += 1
+    if response.status_code >= 400:
+        _request_counters["errors"] += 1
     return response
+
+
+@app.get("/metrics")
+def metrics() -> dict[str, int]:
+    return dict(_request_counters)
 

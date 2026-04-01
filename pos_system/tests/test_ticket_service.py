@@ -17,8 +17,9 @@ from app.utils.logger import ActionLogger
 
 
 class FakeApiClient:
-    def __init__(self, fail_post: bool = False) -> None:
+    def __init__(self, fail_post: bool = False, payment_status: str = "CONFIRMED") -> None:
         self.fail_post = fail_post
+        self.payment_status = payment_status
 
     def get_products(self):
         return [{"id": "p1", "name": "Daily", "price_cents": 1000}]
@@ -35,6 +36,9 @@ class FakeApiClient:
         if self.fail_post:
             raise ApiClientError("offline")
         return {"ok": True, "payload": payload}
+
+    def get_payment_status(self, ticket_id):
+        return {"ticket_id": ticket_id, "status": self.payment_status, "paid": self.payment_status in {"CONFIRMED", "RECEIVED"}}
 
 
 class TicketServiceTests(unittest.TestCase):
@@ -61,12 +65,12 @@ class TicketServiceTests(unittest.TestCase):
         self.conn.close()
         self.tmp.cleanup()
 
-    def _build_service(self, fail_post: bool = False) -> TicketService:
+    def _build_service(self, fail_post: bool = False, payment_status: str = "CONFIRMED", approved: bool = True) -> TicketService:
         return TicketService(
             settings=self.settings,
             repository=self.repo,
-            api_client=FakeApiClient(fail_post=fail_post),
-            payment_provider=MockPaymentProvider(api_key="pay-key", approved=True, latency_seconds=0),
+            api_client=FakeApiClient(fail_post=fail_post, payment_status=payment_status),
+            payment_provider=MockPaymentProvider(api_key="pay-key", approved=approved, latency_seconds=0),
             qr_service=self.qr,
             offline_queue=OfflineQueueService(repository=self.repo),
             logger=self.logger,
@@ -98,6 +102,23 @@ class TicketServiceTests(unittest.TestCase):
         result = service.process_exit_payment(ticket.qr_payload)
         self.assertEqual(result["ticket_id"], ticket.id)
         self.assertEqual(result["charged_amount_cents"], 1500)
+
+    def test_exit_payment_pending_then_confirmed(self) -> None:
+        service = self._build_service(payment_status="CONFIRMED", approved=False)
+        product = {"id": "p1", "name": "Daily", "price_cents": 1000}
+        ticket = service.emit_ticket(product=product, pay_now=False)
+        result = service.process_exit_payment(ticket.qr_payload)
+        self.assertIn(result["payment_status"], {"CONFIRMED", "RECEIVED"})
+
+    def test_event_marked_queued_when_api_offline(self) -> None:
+        service = self._build_service(fail_post=True)
+        product = {"id": "p1", "name": "Daily", "price_cents": 1000}
+        ticket = service.emit_ticket(product=product, pay_now=False)
+
+        cursor = self.conn.execute("SELECT status FROM events WHERE ticket_id=? ORDER BY created_at DESC LIMIT 1", (ticket.id,))
+        row = cursor.fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["status"], "QUEUED")
 
 
 if __name__ == "__main__":

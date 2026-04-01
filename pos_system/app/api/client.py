@@ -33,6 +33,9 @@ class ExternalApiClient:
     def post_event(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/events", json=payload)
 
+    def get_payment_status(self, ticket_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/payments/status/{ticket_id}")
+
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         url = f"{self._base_url}{path}"
         try:

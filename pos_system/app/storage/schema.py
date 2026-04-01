@@ -29,8 +29,10 @@ CREATE TABLE IF NOT EXISTS transactions (
     id TEXT PRIMARY KEY,
     ticket_id TEXT NOT NULL,
     provider TEXT NOT NULL,
+    provider_status TEXT NOT NULL DEFAULT '',
     amount_cents INTEGER NOT NULL,
     approved INTEGER NOT NULL,
+    payment_reference TEXT NOT NULL DEFAULT '',
     raw_response TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
@@ -46,6 +48,10 @@ CREATE TABLE IF NOT EXISTS sync_queue (
     status TEXT NOT NULL DEFAULT 'pending',
     last_error TEXT
 );
+
+CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
+CREATE INDEX IF NOT EXISTS idx_events_ticket_id ON events(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_sync_status_retry ON sync_queue(status, next_retry_at);
 """
 
 

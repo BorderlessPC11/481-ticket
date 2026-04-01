@@ -4,9 +4,11 @@ import sqlite3
 from typing import Any
 
 from app.api.client import ExternalApiClient
-from app.config import load_settings
+from app.config import Settings, load_settings
 from app.offline.queue import OfflineQueueService
 from app.offline.worker import SyncWorker
+from app.payments.base import PaymentProvider
+from app.payments.asaas_provider import AsaasPaymentProvider
 from app.payments.mock_provider import MockPaymentProvider
 from app.qr.scanner import SimulatedQrScanner
 from app.qr.service import QrService
@@ -25,6 +27,22 @@ def _pick_product(products: list[dict[str, Any]]) -> dict[str, Any]:
     return products[selection - 1]
 
 
+def _build_payment_provider(settings: Settings) -> PaymentProvider:
+    provider_name = settings.payment_provider
+    normalized = provider_name.strip().lower()
+    if normalized == "mock":
+        return MockPaymentProvider(api_key=settings.payment_api_key)
+    if normalized == "asaas":
+        return AsaasPaymentProvider(
+            api_key=settings.payment_api_key,
+            customer_id=settings.asaas_customer_id,
+            api_base_url=settings.asaas_api_base_url,
+            billing_type=settings.asaas_billing_type,
+            timeout_seconds=settings.timeout_seconds,
+        )
+    raise ValueError(f"Unsupported PAYMENT_PROVIDER: {provider_name}")
+
+
 def run() -> None:
     settings = load_settings()
     logger = ActionLogger()
@@ -34,7 +52,7 @@ def run() -> None:
     repository = PosRepository(conn)
 
     api_client = ExternalApiClient(settings=settings)
-    payment_provider = MockPaymentProvider(api_key=settings.payment_api_key)
+    payment_provider = _build_payment_provider(settings)
     qr_service = QrService()
     scanner = SimulatedQrScanner()
     offline_queue = OfflineQueueService(repository=repository)
@@ -76,7 +94,10 @@ def run() -> None:
             elif option == "3":
                 qr_payload = scanner.scan()
                 result = ticket_service.process_exit_payment(qr_payload=qr_payload)
-                print(f"Exit payment ok: {result}")
+                if result.get("payment_status") in {"RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH", "paid"}:
+                    print(f"Exit payment ok: {result}")
+                else:
+                    print(f"Exit payment pending confirmation: {result}")
             elif option == "4":
                 processed = worker.run_once()
                 print(f"Offline sync processed items: {processed}")
@@ -90,4 +111,7 @@ def run() -> None:
 
 
 if __name__ == "__main__":
-    run()
+    try:
+        run()
+    except Exception as exc:  # noqa: BLE001
+        print(f"Startup error: {exc}")

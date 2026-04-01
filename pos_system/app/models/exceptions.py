@@ -12,3 +12,7 @@ class PaymentError(PosSystemError):
 
 class StorageError(PosSystemError):
     """Raised when local persistence operations fail."""
+
+
+class ValidationError(PosSystemError):
+    """Raised when input payload validation fails."""

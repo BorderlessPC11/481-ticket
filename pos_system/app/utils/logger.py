@@ -19,10 +19,22 @@ class ActionLogger:
             self._logger.addHandler(handler)
 
     def log(self, action: str, payload: dict[str, Any], status: str) -> None:
+        safe_payload = self._redact(payload)
         entry = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "action": action,
-            "payload": payload,
+            "payload": safe_payload,
             "status": status,
         }
         self._logger.info(json.dumps(entry, ensure_ascii=True))
+
+    @staticmethod
+    def _redact(payload: dict[str, Any]) -> dict[str, Any]:
+        redacted: dict[str, Any] = {}
+        sensitive_keys = {"api_key", "token", "access_token", "authorization", "payment_api_key"}
+        for key, value in payload.items():
+            if key.lower() in sensitive_keys:
+                redacted[key] = "***"
+            else:
+                redacted[key] = value
+        return redacted

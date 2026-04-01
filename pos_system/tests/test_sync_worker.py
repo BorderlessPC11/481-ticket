@@ -3,8 +3,10 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
+from app.models.entities import Event
 from app.models.exceptions import ApiClientError
 from app.offline.worker import SyncWorker
 from app.storage.repositories import PosRepository
@@ -49,6 +51,28 @@ class SyncWorkerTests(unittest.TestCase):
         self.assertEqual(processed, 0)
         row = self.repo.get_pending_sync(limit=10)
         self.assertEqual(len(row), 0)
+
+    def test_sync_event_marks_event_sent(self) -> None:
+        self.repo.save_event(
+            event=Event(
+                id="e123",
+                event_type="ENTRY",
+                ticket_id="t123",
+                payload={"ticket_id": "t123"},
+                status="QUEUED",
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        self.repo.enqueue_sync("event", "/events", {"id": "e123"}, "key-event-123")
+        worker = SyncWorker(self.repo, FakeApiClient(fail=False), self.logger, retry_limit=3)
+
+        processed = worker.run_once()
+        self.assertEqual(processed, 1)
+
+        cursor = self.conn.execute("SELECT status FROM events WHERE id='e123'")
+        row = cursor.fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["status"], "SENT")
 
 
 if __name__ == "__main__":
