@@ -36,6 +36,7 @@ From inside `pos_system/`:
 
 - Preferred: `python3 run.py`
 - Alternative: `python3 -m app.main`
+- **Windows (sem `python` no PATH):** dê duplo clique em `run-pos.cmd` ou execute `.\run-pos.cmd` (usa `.\.venv\Scripts\python.exe`). Na raiz do repositório: `run-pos.cmd`.
 
 ## Tests
 

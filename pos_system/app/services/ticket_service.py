@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -24,6 +25,12 @@ from app.payments.base import PaymentProvider
 from app.qr.service import QrService
 from app.storage.repositories import PosRepository
 from app.utils.logger import ActionLogger
+
+
+@dataclass(frozen=True)
+class EmitTicketResult:
+    ticket: Ticket
+    report_lines: tuple[str, ...] = ()
 
 
 class TicketService:
@@ -50,55 +57,134 @@ class TicketService:
         self._logger.log("fetch_products", {"count": len(products)}, "ok")
         return products
 
-    def emit_ticket(self, product: dict[str, Any], pay_now: bool) -> Ticket:
+    def emit_ticket(self, product: dict[str, Any], pay_now: bool) -> EmitTicketResult:
+        if pay_now:
+            return self._emit_ticket_paid_scenario1(product)
+        return self._emit_ticket_unpaid(product)
+
+    def _emit_ticket_paid_scenario1(self, product: dict[str, Any]) -> EmitTicketResult:
+        """
+        Cenário 1: produto -> pagamento -> (se aprovado) ticket + QR -> API.
+        Nada é persistido nem enviado se o pagamento falhar.
+        """
+        report: list[str] = []
         ticket_id = str(uuid.uuid4())
         amount_cents = int(product["price_cents"])
+
+        result = self._payment_provider.charge(amount_cents=amount_cents, reference_id=ticket_id)
+        if not result.approved:
+            self._logger.log("payment_charge", {"ticket_id": ticket_id, "approved": False}, "error")
+            raise PaymentError(
+                "Pagamento nao aprovado: nenhum ticket, QR ou envio para API serao criados (Cenario 1)."
+            )
+
+        self._logger.log("payment_charge", {"ticket_id": ticket_id, "tx_id": result.transaction_id}, "ok")
+        report.append("Pagamento: aprovado")
+
+        self._repository.save_transaction(ticket_id=ticket_id, payment_result=result)
+
+        entry_at = datetime.now(timezone.utc)
         qr_payload_data = {
             "ticket_id": ticket_id,
             "product_id": product["id"],
             "device_id": self._settings.device_id,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": entry_at.isoformat(),
         }
         qr_payload = self._qr_service.encode_ticket_data(qr_payload_data)
         qr_path = self._qr_service.generate_qr(ticket_id=ticket_id, qr_payload=qr_payload)
-
-        paid = False
-        if pay_now:
-            result = self._payment_provider.charge(amount_cents=amount_cents, reference_id=ticket_id)
-            if not result.approved:
-                raise PaymentError("Payment was not approved")
-            paid = True
-            self._repository.save_transaction(ticket_id=ticket_id, payment_result=result)
-            self._logger.log("payment_charge", {"ticket_id": ticket_id, "tx_id": result.transaction_id}, "ok")
+        report.append(f"QR: gerado em {qr_path}")
 
         ticket = Ticket(
             id=ticket_id,
             product_id=str(product["id"]),
             product_name=str(product.get("name", "unknown")),
             amount_cents=amount_cents,
-            paid=paid,
+            paid=True,
             qr_payload=qr_payload,
             qr_path=qr_path,
             status=TICKET_STATUS_OPEN,
-            created_at=datetime.now(timezone.utc),
+            created_at=entry_at,
         )
         self._repository.save_ticket(ticket)
-        self._logger.log("ticket_created", {"ticket_id": ticket.id, "paid": paid}, "ok")
+        self._logger.log("ticket_created", {"ticket_id": ticket.id, "paid": True}, "ok")
+        report.append(f"Ticket: criado (pago) — id={ticket.id} — entrada em {entry_at.isoformat()}")
 
-        ticket_payload = self._ticket_to_api_payload(ticket)
-        self._send_or_enqueue("ticket", "/tickets", ticket_payload, f"ticket:{ticket.id}")
+        sent_ticket = self._send_or_enqueue("ticket", "/tickets", self._ticket_to_api_payload(ticket), f"ticket:{ticket.id}")
+        report.append("API: ticket " + ("enviado (POST /tickets) com paid=true" if sent_ticket else "enfileirado (POST /tickets) — aguarda sincronizacao"))
 
         event = Event(
             id=str(uuid.uuid4()),
             event_type="ENTRY",
             ticket_id=ticket.id,
-            payload={"ticket_id": ticket.id, "paid": paid},
+            payload={
+                "ticket_id": ticket.id,
+                "paid": True,
+                "entry_at": entry_at.isoformat(),
+            },
             status=EVENT_STATUS_PENDING,
             created_at=datetime.now(timezone.utc),
         )
         self._repository.save_event(event)
-        self._send_or_enqueue_event(event)
-        return ticket
+        sent_event = self._send_or_enqueue("event", "/events", self._event_to_api_payload(event), f"event:{event.id}")
+        self._safe_update_event_status(event.id, sent_event)
+        report.append("API: evento ENTRY " + ("registrado (POST /events)" if sent_event else "enfileirado (POST /events) — aguarda sincronizacao"))
+
+        return EmitTicketResult(ticket=ticket, report_lines=tuple(report))
+
+    def _emit_ticket_unpaid(self, product: dict[str, Any]) -> EmitTicketResult:
+        """
+        Cenário 2: emissao sem pagamento imediato (QR antes de possivel pagamento na saida).
+        """
+        report: list[str] = []
+        ticket_id = str(uuid.uuid4())
+        amount_cents = int(product["price_cents"])
+        entry_at = datetime.now(timezone.utc)
+        qr_payload_data = {
+            "ticket_id": ticket_id,
+            "product_id": product["id"],
+            "device_id": self._settings.device_id,
+            "created_at": entry_at.isoformat(),
+        }
+        qr_payload = self._qr_service.encode_ticket_data(qr_payload_data)
+        qr_path = self._qr_service.generate_qr(ticket_id=ticket_id, qr_payload=qr_payload)
+        report.append(f"QR: gerado em {qr_path}")
+
+        ticket = Ticket(
+            id=ticket_id,
+            product_id=str(product["id"]),
+            product_name=str(product.get("name", "unknown")),
+            amount_cents=amount_cents,
+            paid=False,
+            qr_payload=qr_payload,
+            qr_path=qr_path,
+            status=TICKET_STATUS_OPEN,
+            created_at=entry_at,
+        )
+        self._repository.save_ticket(ticket)
+        self._logger.log("ticket_created", {"ticket_id": ticket.id, "paid": False}, "ok")
+        report.append(f"Ticket: criado (aguarda pagamento) — id={ticket.id}")
+
+        sent_ticket = self._send_or_enqueue("ticket", "/tickets", self._ticket_to_api_payload(ticket), f"ticket:{ticket.id}")
+        report.append("API: ticket " + ("enviado (POST /tickets)" if sent_ticket else "enfileirado (POST /tickets)"))
+
+        event = Event(
+            id=str(uuid.uuid4()),
+            event_type="ENTRY",
+            ticket_id=ticket.id,
+            payload={"ticket_id": ticket.id, "paid": False, "entry_at": entry_at.isoformat()},
+            status=EVENT_STATUS_PENDING,
+            created_at=datetime.now(timezone.utc),
+        )
+        self._repository.save_event(event)
+        sent_event = self._send_or_enqueue("event", "/events", self._event_to_api_payload(event), f"event:{event.id}")
+        self._safe_update_event_status(event.id, sent_event)
+        report.append("API: evento ENTRY " + ("registrado" if sent_event else "enfileirado"))
+
+        return EmitTicketResult(ticket=ticket, report_lines=tuple(report))
+
+    def _safe_update_event_status(self, event_id: str, sent: bool) -> None:
+        event_status = EVENT_STATUS_SENT if sent else EVENT_STATUS_QUEUED
+        self._repository.update_event_status(event_id, event_status)
 
     def process_exit_payment(self, qr_payload: str) -> dict[str, Any]:
         try:

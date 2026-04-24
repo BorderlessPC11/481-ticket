@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from app.config import Settings
-from app.models.exceptions import ApiClientError
+from app.models.exceptions import ApiClientError, PaymentError
 from app.offline.queue import OfflineQueueService
 from app.payments.mock_provider import MockPaymentProvider
 from app.qr.service import QrService
@@ -79,14 +79,27 @@ class TicketServiceTests(unittest.TestCase):
     def test_emit_ticket_paid(self) -> None:
         service = self._build_service()
         product = {"id": "p1", "name": "Daily", "price_cents": 1000}
-        ticket = service.emit_ticket(product=product, pay_now=True)
-        self.assertTrue(ticket.paid)
+        result = service.emit_ticket(product=product, pay_now=True)
+        self.assertTrue(result.ticket.paid)
+        self.assertTrue(any("Pagamento: aprovado" in x for x in result.report_lines))
+
+    def test_emit_ticket_paid_rejected_persists_nothing(self) -> None:
+        service = self._build_service(approved=False)
+        product = {"id": "p1", "name": "Daily", "price_cents": 1000}
+        with self.assertRaises(PaymentError):
+            service.emit_ticket(product=product, pay_now=True)
+        n_tickets = self.conn.execute("SELECT COUNT(*) AS c FROM tickets").fetchone()["c"]
+        n_tx = self.conn.execute("SELECT COUNT(*) AS c FROM transactions").fetchone()["c"]
+        n_q = self.conn.execute("SELECT COUNT(*) AS c FROM sync_queue").fetchone()["c"]
+        self.assertEqual(n_tickets, 0)
+        self.assertEqual(n_tx, 0)
+        self.assertEqual(n_q, 0)
 
     def test_emit_ticket_unpaid(self) -> None:
         service = self._build_service()
         product = {"id": "p1", "name": "Daily", "price_cents": 1000}
-        ticket = service.emit_ticket(product=product, pay_now=False)
-        self.assertFalse(ticket.paid)
+        result = service.emit_ticket(product=product, pay_now=False)
+        self.assertFalse(result.ticket.paid)
 
     def test_enqueue_when_api_offline(self) -> None:
         service = self._build_service(fail_post=True)
@@ -98,7 +111,7 @@ class TicketServiceTests(unittest.TestCase):
     def test_exit_payment_flow(self) -> None:
         service = self._build_service()
         product = {"id": "p1", "name": "Daily", "price_cents": 1000}
-        ticket = service.emit_ticket(product=product, pay_now=False)
+        ticket = service.emit_ticket(product=product, pay_now=False).ticket
         result = service.process_exit_payment(ticket.qr_payload)
         self.assertEqual(result["ticket_id"], ticket.id)
         self.assertEqual(result["charged_amount_cents"], 1500)
@@ -106,14 +119,14 @@ class TicketServiceTests(unittest.TestCase):
     def test_exit_payment_pending_then_confirmed(self) -> None:
         service = self._build_service(payment_status="CONFIRMED", approved=False)
         product = {"id": "p1", "name": "Daily", "price_cents": 1000}
-        ticket = service.emit_ticket(product=product, pay_now=False)
+        ticket = service.emit_ticket(product=product, pay_now=False).ticket
         result = service.process_exit_payment(ticket.qr_payload)
         self.assertIn(result["payment_status"], {"CONFIRMED", "RECEIVED"})
 
     def test_event_marked_queued_when_api_offline(self) -> None:
         service = self._build_service(fail_post=True)
         product = {"id": "p1", "name": "Daily", "price_cents": 1000}
-        ticket = service.emit_ticket(product=product, pay_now=False)
+        ticket = service.emit_ticket(product=product, pay_now=False).ticket
 
         cursor = self.conn.execute("SELECT status FROM events WHERE ticket_id=? ORDER BY created_at DESC LIMIT 1", (ticket.id,))
         row = cursor.fetchone()

@@ -9,6 +9,7 @@
    - `.venv/bin/python -m pip install -r requirements.txt`
 3. Start API:
    - `.venv/bin/python -m uvicorn app.main:app --reload --port 8000`
+   - **Windows:** `run-backend.cmd` (em `backend/` ou na raiz do repositório) evita depender de `python` no PATH.
 
 ## POS Client Integration
 

@@ -85,12 +85,16 @@ def run() -> None:
             option = input("Choose an option: ").strip()
             if option == "1":
                 product = _pick_product(ticket_service.fetch_products())
-                ticket = ticket_service.emit_ticket(product=product, pay_now=True)
-                print(f"Ticket issued: {ticket.id}, QR file: {ticket.qr_path}")
+                emit_result = ticket_service.emit_ticket(product=product, pay_now=True)
+                for line in emit_result.report_lines:
+                    print(line)
+                print(f"Concluido. Ticket id: {emit_result.ticket.id}")
             elif option == "2":
                 product = _pick_product(ticket_service.fetch_products())
-                ticket = ticket_service.emit_ticket(product=product, pay_now=False)
-                print(f"Ticket issued without payment: {ticket.id}, QR file: {ticket.qr_path}")
+                emit_result = ticket_service.emit_ticket(product=product, pay_now=False)
+                for line in emit_result.report_lines:
+                    print(line)
+                print(f"Concluido. Ticket id: {emit_result.ticket.id}")
             elif option == "3":
                 qr_payload = scanner.scan()
                 result = ticket_service.process_exit_payment(qr_payload=qr_payload)
