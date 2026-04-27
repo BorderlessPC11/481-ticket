@@ -10,6 +10,14 @@ from dotenv import load_dotenv
 class Settings:
     api_base_url: str
     api_token: str
+    """When set, sent as X-CSRFToken (Django / some gateways require it for unsafe methods; optional for GET)."""
+    api_csrf_token: str
+    """If True, API ``valorUnitario`` is already in centavos. If False, it is in reais and converted to centavos."""
+    api_product_valor_unitario_in_cents: bool
+    """Obrigatórios para ``PAYMENT_PROVIDER=catraca`` (``POST /api/payments/``)."""
+    api_cnpj: str
+    api_equipamento_id: str
+    api_payment_quantidade: int
     payment_provider: str
     payment_api_key: str
     device_id: str
@@ -76,9 +84,34 @@ def load_settings() -> Settings:
     if payment_provider.lower() == "asaas" and not asaas_customer_id:
         raise ValueError("Missing required environment variable for Asaas provider: ASAAS_CUSTOMER_ID")
 
+    api_cnpj = os.getenv("API_CNPJ", "").strip()
+    api_equipamento_id = os.getenv("API_EQUIPAMENTO_ID", "").strip()
+    q_raw = os.getenv("API_PAYMENT_QUANTIDADE", "1").strip()
+    try:
+        api_payment_quantidade = int(q_raw) if q_raw else 1
+    except ValueError as exc:
+        raise ValueError("API_PAYMENT_QUANTIDADE must be an integer") from exc
+    if api_payment_quantidade < 1:
+        raise ValueError("API_PAYMENT_QUANTIDADE must be at least 1")
+
+    if payment_provider.lower() == "catraca":
+        if not api_cnpj:
+            raise ValueError("Missing required environment variable for catraca payment: API_CNPJ")
+        if not api_equipamento_id:
+            raise ValueError("Missing required environment variable for catraca payment: API_EQUIPAMENTO_ID")
+
+    api_csrf_token = os.getenv("API_CSRF_TOKEN", "").strip()
+    valor_in_cents_raw = os.getenv("API_PRODUCT_VALOR_UNITARIO_IN_CENTS", "0").strip().lower()
+    api_product_valor_unitario_in_cents = valor_in_cents_raw in {"1", "true", "yes", "y"}
+
     return Settings(
         api_base_url=_required("API_BASE_URL"),
         api_token=_required("API_TOKEN"),
+        api_csrf_token=api_csrf_token,
+        api_product_valor_unitario_in_cents=api_product_valor_unitario_in_cents,
+        api_cnpj=api_cnpj,
+        api_equipamento_id=api_equipamento_id,
+        api_payment_quantidade=api_payment_quantidade,
         payment_provider=payment_provider,
         payment_api_key=_required("PAYMENT_API_KEY"),
         device_id=_required("DEVICE_ID"),

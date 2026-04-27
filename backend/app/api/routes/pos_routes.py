@@ -26,6 +26,7 @@ def ready(db: Session = Depends(get_db)) -> dict[str, str]:
 
 
 @router.get("/products", response_model=list[ProductOut], dependencies=[Depends(require_bearer_token)])
+@router.get("/api/products/", response_model=list[ProductOut], dependencies=[Depends(require_bearer_token)])
 def get_products(db: Session = Depends(get_db)) -> list[ProductOut]:
     repo = PosRepository(db)
     return [ProductOut.model_validate(row, from_attributes=True) for row in repo.list_products()]

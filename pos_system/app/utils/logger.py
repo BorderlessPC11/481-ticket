@@ -18,6 +18,11 @@ class ActionLogger:
             handler.setFormatter(formatter)
             self._logger.addHandler(handler)
 
+    def close(self) -> None:
+        for handler in list(self._logger.handlers):
+            self._logger.removeHandler(handler)
+            handler.close()
+
     def log(self, action: str, payload: dict[str, Any], status: str) -> None:
         safe_payload = self._redact(payload)
         entry = {

@@ -32,6 +32,9 @@ class FakeApiClient:
     def get_pricing(self, qr_payload):
         return {"amount_cents": 1500, "qr_payload": qr_payload}
 
+    def calculate_exit_amount_cents(self, **kwargs):
+        return 1500
+
     def post_event(self, payload):
         if self.fail_post:
             raise ApiClientError("offline")
@@ -51,6 +54,11 @@ class TicketServiceTests(unittest.TestCase):
         self.settings = Settings(
             api_base_url="https://example.com/api",
             api_token="token",
+            api_csrf_token="",
+            api_product_valor_unitario_in_cents=False,
+            api_cnpj="00000000000100",
+            api_equipamento_id="",
+            api_payment_quantidade=1,
             payment_provider="mock",
             payment_api_key="pay-key",
             device_id="POS-01",
@@ -63,6 +71,7 @@ class TicketServiceTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.conn.close()
+        self.logger.close()
         self.tmp.cleanup()
 
     def _build_service(self, fail_post: bool = False, payment_status: str = "CONFIRMED", approved: bool = True) -> TicketService:

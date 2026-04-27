@@ -34,9 +34,10 @@ class SyncWorkerTests(unittest.TestCase):
         self.conn = sqlite3.connect(":memory:")
         init_db(self.conn)
         self.repo = PosRepository(self.conn)
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        self.logger = ActionLogger(log_path=str(Path(tmp.name) / "worker.log"))
+        self._tmp = tempfile.TemporaryDirectory()
+        self.logger = ActionLogger(log_path=str(Path(self._tmp.name) / "worker.log"))
+        self.addCleanup(self._tmp.cleanup)
+        self.addCleanup(self.logger.close)
 
     def test_sync_success(self) -> None:
         self.repo.enqueue_sync("ticket", "/tickets", {"id": "t1"}, "key1")

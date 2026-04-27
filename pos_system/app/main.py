@@ -9,6 +9,7 @@ from app.offline.queue import OfflineQueueService
 from app.offline.worker import SyncWorker
 from app.payments.base import PaymentProvider
 from app.payments.asaas_provider import AsaasPaymentProvider
+from app.payments.catraca_provider import CatracaPaymentProvider
 from app.payments.mock_provider import MockPaymentProvider
 from app.qr.scanner import SimulatedQrScanner
 from app.qr.service import QrService
@@ -27,11 +28,13 @@ def _pick_product(products: list[dict[str, Any]]) -> dict[str, Any]:
     return products[selection - 1]
 
 
-def _build_payment_provider(settings: Settings) -> PaymentProvider:
+def _build_payment_provider(settings: Settings, api_client: ExternalApiClient) -> PaymentProvider:
     provider_name = settings.payment_provider
     normalized = provider_name.strip().lower()
     if normalized == "mock":
         return MockPaymentProvider(api_key=settings.payment_api_key)
+    if normalized == "catraca":
+        return CatracaPaymentProvider(settings=settings, api_client=api_client)
     if normalized == "asaas":
         return AsaasPaymentProvider(
             api_key=settings.payment_api_key,
@@ -52,7 +55,7 @@ def run() -> None:
     repository = PosRepository(conn)
 
     api_client = ExternalApiClient(settings=settings)
-    payment_provider = _build_payment_provider(settings)
+    payment_provider = _build_payment_provider(settings, api_client)
     qr_service = QrService()
     scanner = SimulatedQrScanner()
     offline_queue = OfflineQueueService(repository=repository)

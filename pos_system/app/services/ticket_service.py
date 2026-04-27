@@ -198,8 +198,21 @@ class TicketService:
         if ticket is None:
             raise ValidationError("Ticket not found in local storage")
 
-        pricing = self._api_client.get_pricing(qr_payload)
-        amount_cents = int(pricing.get("amount_cents", ticket["amount_cents"]))
+        produto_id = str(data.get("product_id", "")).strip() or str(ticket.get("product_id", "")).strip()
+        if not produto_id:
+            raise ValidationError("Missing product_id for calculate-tolerance (QR or ticket)")
+        cnpj = (self._settings.api_cnpj or "").strip()
+        if not cnpj:
+            raise ValidationError("API_CNPJ is required for exit payment (POST /api/payments/calculate-tolerance/)")
+        data_hora_pagamento = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        try:
+            amount_cents = self._api_client.calculate_exit_amount_cents(
+                produto_id=produto_id,
+                cnpj=cnpj,
+                data_hora_pagamento=data_hora_pagamento,
+            )
+        except ApiClientError as exc:
+            raise ValidationError(f"Failed to calculate exit amount: {exc}") from exc
         payment_result = self._payment_provider.charge(amount_cents=amount_cents, reference_id=ticket_id)
         self._repository.save_transaction(ticket_id=ticket_id, payment_result=payment_result)
         if payment_result.approved:
